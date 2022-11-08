@@ -30,13 +30,15 @@ def save_checkpoint(state, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Code for MTG-DCU collaboration')
+    parser = argparse.ArgumentParser(description='Code for self-supervised ACL')
     parser.add_argument('-p', '--params_yaml', dest='params_yaml', action='store', required=False, type=str)
+
     config = parser.parse_args()
+
     print('\nYaml file with parameters defining the experiment: %s\n' % str(config.params_yaml))
-   
+
     # Read parameters file from yaml passed by argument
-    args = yaml.load(open(config.params_yaml))
+    args = yaml.full_load(open(config.params_yaml))
 
     return args
 
@@ -114,8 +116,9 @@ def main(args):
 
     job_start = time.time()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args['learn']['cuda_dev'])
+    #os.environ['CUDA_VISIBLE_DEVICES'] = str(args['learn']['cuda_dev'])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print('device is', device)
 
     torch.backends.cudnn.deterministic = True  # fix the GPU to deterministic mode
     torch.manual_seed(args['learn']['seed_initialization'])  # CPU seed
@@ -134,7 +137,11 @@ def main(args):
         model = resnet_mod.resnet18(args, num_classes=args["learn"]["num_classes"]).to(device)
 
         if args['learn']['downstream']==1:
-            model.load_state_dict(torch.load("pth/ResNet_best.pth"))
+            #model.load_state_dict(torch.load("pth/ResNet_best.pth"))
+            model_dir = 'results_models/models_res18_unsup'+os.environ['SLURM_ARRAY_TASK_ID']+'_SI271828/best.pth'
+            model.load_state_dict(torch.load(model_dir))
+            print('loaded model from ', model_dir)
+
             if args['learn']['lin_eval']==1:
                 # freeze weights for linear evaluation
                 for param in model.parameters():
@@ -378,6 +385,8 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
-
+    #__import__("pdb").set_trace()
+    args['learn']['experiment_name']+= str(os.environ['SLURM_ARRAY_TASK_ID'])
+    #print(args)
     # train
     main(args)

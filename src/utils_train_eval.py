@@ -4,7 +4,10 @@ import numpy as np
 from utils.AverageMeter import AverageMeter
 from utils.criterion import *
 import time
+import os
 import warnings
+
+from sklearn.metrics import mean_squared_error
 warnings.filterwarnings('ignore')
 
 global_step = 0
@@ -54,6 +57,57 @@ def train_CrossEntropy(args, model, device, train_loader, optimizer, epoch, num_
 
     return train_loss.avg, top5.avg, top1.avg, batch_time.sum
 
+def amc(args,device, features):
+    bs = features.shape[0]/2
+
+    labels = torch.cat([torch.arange(bs) for i in range(2)], dim=0)
+    labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+    labels = labels.to(device)
+
+    features = F.normalize(features, dim=1)
+    #print(features.shape)
+
+    similarity_matrix = torch.matmul(features, features.T)
+    # assert similarity_matrix.shape == (
+    #     self.args.n_views * self.args.batch_size, self.args.n_views * self.args.batch_size)
+    # assert similarity_matrix.shape == labels.shape
+
+    # discard the main diagonal from both: labels and similarities matrix
+    mask = torch.eye(labels.shape[0], dtype=torch.bool).to(device)
+    labels = labels[~mask].view(labels.shape[0], -1)
+    similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+    # assert similarity_matrix.shape == labels.shape
+
+    # select and combine multiple positives
+    positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+
+    # select only the negatives the negatives
+    negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+
+    # logits = torch.cat([positives, negatives], dim=1)
+
+    # labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.args.device)
+
+    # logits = logits / self.args.temperature
+
+    m = 0.5
+    negatives = torch.clamp(negatives,min=-1+1e-10,max=1-1e-10)
+    clip = torch.acos(negatives)
+    b1 = m - clip
+    mask = b1>0
+    l1 = torch.sum((mask*b1)**2)
+    positives = torch.clamp(positives,min = -1+1e-10,max = 1-1e-10)
+    l2 = torch.acos(positives)
+    l2 = torch.sum(l2**2)
+    #__import__("pdb").set_trace()
+
+
+    loss = (l1 + l2)/25
+    #print(l1,l2,l)
+    #__import__("pdb").set_trace()
+
+    return loss
+
 
 def train_Contrastive(args, model, model_head, device, train_loader, optimizer, epoch, num_classes):
     """
@@ -81,6 +135,7 @@ def train_Contrastive(args, model, model_head, device, train_loader, optimizer, 
 
     for ex1, ex2, labels, index in train_loader:
 
+
         ex1, ex2, labels, index = ex1.to(device), ex2.to(device), labels.to(device), index.to(device)
         # note ex1 and ex2 are batches of examples
         bsz = ex1.shape[0]
@@ -98,6 +153,7 @@ def train_Contrastive(args, model, model_head, device, train_loader, optimizer, 
         # get metric embeddings that feed the loss (z_i, z_j)
         z_i = model_head(embedi)
         z_j = model_head(embedj)
+
 
         # concatenate the two batches: from N to 2N
         zs = torch.cat([z_i, z_j], dim=0)
@@ -134,9 +190,18 @@ def train_Contrastive(args, model, model_head, device, train_loader, optimizer, 
 
         # Compute mean of log-likelihood over positives
         mean_log_prob_pos = (mask * log_prob).sum(1) / mask.sum(1)
-        loss = - mean_log_prob_pos
-        loss = loss.view(2, bsz)
-        loss = loss.mean()
+
+        loss1 = - mean_log_prob_pos
+        loss1 = loss1.view(2, bsz)
+        loss1 = loss1.mean()
+
+        features = torch.cat([embedi, embedj], dim=0)
+
+        loss2 = amc(args,device,features)
+        alpha = int(os.environ['SLURM_ARRAY_TASK_ID'])/10
+        #print('alpha is', alpha)
+
+        loss = alpha*loss1 + (1-alpha)*loss2
 
         train_loss.update(loss.item(), 2*bsz)
 
@@ -182,6 +247,8 @@ def eval_model(args, model, device, test_loader):
                 # process one evaluation clip
                 num_examples = len(torch.nonzero(index==idx_batch[i]))
                 output = model(examples[counter:counter+num_examples].unsqueeze(1))  # logits per patch
+                #__import__("pdb").set_trace()
+
 
                 loss = criterion(output, labels[counter:counter+num_examples])
                 output = F.softmax(output, dim=1)    # class probabilities per patch
@@ -245,6 +312,7 @@ def eval_model_contrastive(args, model, model_head, device, test_loader, K):
                  _, output_ = model(examples[counter:counter + num_examples].unsqueeze(1))
 
             output = model_head(output_)
+
             num_TF_patches += output.size(0)
             testFeatures.append(output.data.cpu())
             testLabels.append(labels[counter:counter + num_examples].data.cpu())
@@ -273,6 +341,7 @@ def eval_model_contrastive(args, model, model_head, device, test_loader, K):
                     _, output_ = model(examples[counter:counter + num_examples].unsqueeze(1))
 
                 output = model_head(output_)
+
                 gt_label = labels[counter:counter + num_examples][0].data.cpu()
                 output = output.data.cpu()
 
