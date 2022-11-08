@@ -27,6 +27,7 @@ However, we notice that the test script reports the macro-accuracy and the numbe
 The results of applying ACL loss with respect to different $\alpha$ values are listed below,
 
 | alpha | linear     |
+|-------|------------|
 | 0     | 71.295     |
 | 0.1   | 74.994     |
 | 0.2   | 74.701     |
