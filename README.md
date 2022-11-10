@@ -40,7 +40,5 @@ The results of applying ACL loss with respect to different $\alpha$ values are l
 | 0.9   | 74.453     |
 | *1.0* | *74.160*   |
 
-Italic numbers represent the baseline results where alpha is being 1, and only InfoNCE is used during the training process. Bold numbers show the best results obtained.
-
 # Acknowledgement
 This git repo is adapted from Fonseca et al. [here](https://github.com/edufonseca/uclser20).
